@@ -48,7 +48,9 @@ def parse_args():
     return parser.parse_args()
 
 if __name__ == "__main__":
-
+    """
+    Train a click model and evaluate it under traditional metrics: LL, PPL, NDCG
+    """
     # get arguments
     args = parse_args()
 

@@ -46,7 +46,9 @@ def parse_args():
     return parser.parse_args()
 
 if __name__ == "__main__":
-
+    """
+    Compute the forward PPL for all synthetic dataset by training only one particular click model
+    """
     # get arguments
     args = parse_args()
 
