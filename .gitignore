@@ -5,3 +5,8 @@ build
 .project
 .settings
 .DS_Store
+*.sh
+data
+logs
+*.out
+*.err
