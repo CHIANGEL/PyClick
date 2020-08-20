@@ -24,8 +24,6 @@ class TianGongParser:
 
             sid = int(attr[0])
             qid = int(attr[1].strip())
-            print(attr[4])
-            print(type(attr[4]))
             uids = [int(uid) for uid in eval(attr[4])]
             if len(uids) < 10:
                 continue
