@@ -10,7 +10,8 @@ from abc import abstractmethod
 #import numpy as np
 import math
 import collections
-
+import logging
+import pprint
 import sys
 
 __author__ = 'Luka Stout, Finde Xumara, Ilya Markov'
@@ -232,89 +233,58 @@ class RelevancePrediction(Evaluation):
         cor, p = pearsonr(true_relevances, pred_relevances)
         return auc, cor, p
 
+class RankingPerformance():
 
-class RankingPerformance(Evaluation):
+    def __init__(self, args):
+        self.logger = logging.getLogger(args.model)
 
-    def __init__(self, true_relevances, minimum_occurences = 10):
-        # relevances should be a dict with structure relevances[query_id][url] -> relevanc
-        self.relevances = true_relevances
-        self.minimum_occurences = minimum_occurences
-        super(self.__class__, self).__init__()
-
-    def _group_sessions_if_useful(self, sessions, useful):
+    def evaluate(self, model, relevance_queries, k):
         """
-            Group sessions based on query
+        Return the NDCG@k of the rankings given by the model for the given sessions.
         """
-        sessions_dict = dict()
-        for session in sessions:
-            if session.query in useful:
-                if not session.query in sessions_dict:
-                    sessions_dict[session.query] = []
-                sessions_dict[session.query].append(session)
-        return sessions_dict
-
-    def evaluate(self, click_model, search_sessions):
-        """
-            Return the NDCG_5 of the rankings given by the model for the given sessions.
-        """
-
-        # Only use queries that occur more than MINUMUM_OCCURENCES times and have a true relevance
-        counter = collections.Counter([session.query for session in search_sessions])
-        useful_sessions = [query_id for query_id in counter if counter[query_id] >= self.minimum_occurences and query_id in self.relevances]
-
-        # Group sessions by query
-        sessions_dict = self._group_sessions_if_useful(search_sessions, useful_sessions)
-        total_ndcg = 0
-        not_useful = 0
-
         # For every useful query get the predicted relevance and compute NDCG
-        for query_id in useful_sessions:
-            
-            rel = self.relevances[query_id]
-            ideal_ranking = sorted(rel.values(),reverse = True)[:5]
+        total_ndcg = 0
+        total_query = 0
+        not_useful = 0
+        for info_per_query in relevance_queries:
+            total_query += 1
+            id = info_per_query['id']
+            sid = info_per_query['sid']
+            qid = info_per_query['qid']
+            uids = info_per_query['uids']
+            relevances = info_per_query['relevances']
+            ideal_ranking_relevances = sorted(relevances, reverse=True)[:k]
             
             # Only use query if there is a document with a positive ranking. (Otherwise IDCG will be 0 -> NDCG undetermined.)
-            if not any(ideal_ranking):
+            if not any(ideal_ranking_relevances):
                 not_useful += 1
                 continue
             
-            current_sessions = sessions_dict[query_id]
+            # Get the relevances computed by the model
             pred_rels = dict()
-            for session in current_sessions:
-                for rank, result in enumerate(session.web_results):
-                    if not result.id in pred_rels:
-                        pred_rels[result.id] = click_model.predict_relevance(session.query, result.id)
-            ranking = sorted([doc for doc in pred_rels],key = lambda doc : pred_rels[doc], reverse = True)
+            for uid in uids:
+                pred_rels[uid] = model.predict_relevance(qid, uid)
+            ranking = sorted([uid for uid in pred_rels], key = lambda uid : pred_rels[uid], reverse=True)
+            ranking_relevances = [relevances[uids.index(uid)] for uid in ranking[:k]]
             
-            ranking_relevances = self.get_relevances(query_id, ranking[:5])
-            
+            # Compute ndcg
             dcg = self.dcg(ranking_relevances)
-            idcg = self.dcg(ideal_ranking)            
+            idcg = self.dcg(ideal_ranking_relevances)
             ndcg = dcg / idcg
+            assert ndcg <= 1
             total_ndcg += ndcg
 
-        # If too few queries there might not be any useful queries that also have a ranking in the true_relevances.
-        assert not len(useful_sessions)-not_useful is 0
+        # Checks
+        assert total_query == len(relevance_queries)
+        assert len(relevance_queries) - not_useful > 0
 
-         # Average NDCG over all queries
-        return total_ndcg / (len(useful_sessions)-not_useful)
+        # Average NDCG over all queries
+        ndcg_version1 = total_ndcg / (len(relevance_queries) - not_useful)
+        ndcg_version2 = (total_ndcg + not_useful) / len(relevance_queries)
+        return ndcg_version1, ndcg_version2
 
-
-    #TODO: If not found say 0.5. Probably not correct. Otherwise no evaluations in small testset..
-    def get_relevances(self, query_id, ranking):
-        ranking_relevances = []
-        for doc in ranking:
-            if doc in self.relevances[query_id]:
-                ranking_relevances.append(self.relevances[query_id][doc])
-            else:
-                ranking_relevances.append(0.5)
-
-        return ranking_relevances
-
-        
-
-    def dcg(self, ranking):
+    def dcg(self, ranking_relevances):
         """
-            Computes the DCG for a given ranking.
+        Computes the DCG for a given ranking_relevances
         """
-        return sum([(2**r-1)/math.log(i+2,2) for i,r in enumerate(ranking)])
+        return sum([(2 ** relevance - 1) / math.log(rank + 2, 2) for rank, relevance in enumerate(ranking_relevances)])
